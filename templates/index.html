@@ -59,7 +59,7 @@
             color: #4a657e; /* Blue-grey label color */
             font-size: 1.05em; /* Slightly smaller for formality */
         }
-        select, input[type="text"] {
+        select, input[type="text"], textarea { /* Added textarea */
             padding: 12px;
             border: 1px solid #cdd5df; /* Softer border color */
             border-radius: 8px; /* Rounded corners */
@@ -68,12 +68,16 @@
             box-sizing: border-box; /* Include padding in width */
             transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
-        select:focus, input[type="text"]:focus {
+        select:focus, input[type="text"]:focus, textarea:focus { /* Added textarea */
             border-color: #2c73d2; /* Primary blue focus */
             box-shadow: 0 0 0 3px rgba(44, 115, 210, 0.25); /* Blue glow on focus */
             outline: none;
         }
-        .input-item {
+        textarea {
+            resize: vertical; /* Allow vertical resizing */
+            min-height: 100px; /* Initial height for bulk input */
+        }
+        .input-item { /* Re-added for individual inputs */
             display: flex;
             gap: 10px;
             align-items: center;
@@ -109,24 +113,33 @@
             transform: translateY(-2px);
             box-shadow: 0 5px 10px rgba(0,0,0,0.15); /* More pronounced shadow on hover */
         }
-        .btn-secondary {
+        .btn-secondary { /* Re-added for "Add More Input" */
             background-color: #607d8b; /* Blue-grey secondary color */
             color: white;
         }
-        .btn-secondary:hover {
+        .btn-secondary:hover { /* Re-added for "Add More Input" */
             background-color: #455a64; /* Darker blue-grey on hover */
             transform: translateY(-2px);
             box-shadow: 0 5px 10px rgba(0,0,0,0.15);
         }
-        .btn-danger {
+        .remove-input-btn { /* Style for the 'X' button */
             background-color: #ef5350; /* Soft red for danger */
             color: white;
-            padding: 8px 12px; /* Smaller padding for remove button */
-            font-size: 0.9em;
-            box-shadow: none; /* No shadow for small button */
+            width: 30px; /* Make it square */
+            height: 30px; /* Make it square */
+            border-radius: 50%; /* Make it round */
+            font-size: 1.1em;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0; /* Remove padding */
+            box-shadow: none; /* No shadow */
+            flex-shrink: 0; /* Don't let it shrink */
         }
-        .btn-danger:hover {
+        .remove-input-btn:hover { /* Hover for 'X' button */
             background-color: #e53935; /* Darker red on hover */
+            transform: none; /* No translateY for this small button */
         }
         .btn-success {
             background-color: #4CAF50; /* Green for success/download */
@@ -216,6 +229,38 @@
             background-color: #eef1f5;
             border-radius: 5px;
         }
+        .input-number { /* Styling for the number next to input fields */
+            flex-shrink: 0;
+            width: 25px; /* Fixed width for number */
+            text-align: right;
+            font-weight: bold;
+            color: #4a657e;
+        }
+        .individual-input-actions { /* Container for Add and Remove Empty buttons */
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            justify-content: flex-start;
+            flex-wrap: wrap; /* Allow buttons to wrap */
+        }
+        #toggleInputModeBtn { /* Style for the single toggle button (Bulk Edit / Back to Individual) */
+            padding: 12px 25px;
+            font-size: 1em;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+            background-color: #607d8b; /* Secondary color for this toggle */
+            color: white;
+            font-weight: 500;
+            margin-bottom: 15px; /* Space below the button */
+        }
+        #toggleInputModeBtn:hover {
+            background-color: #455a64;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 10px rgba(0,0,0,0.15);
+        }
 
 
         /* Responsive adjustments */
@@ -230,11 +275,11 @@
                 padding: 20px;
                 gap: 15px;
             }
-            .btn {
+            .btn, .individual-input-actions button, #toggleInputModeBtn {
                 width: 100%; /* Full width buttons on small screens */
                 margin-top: 10px;
             }
-            .button-group {
+            .button-group, .individual-input-actions {
                 flex-direction: column;
                 gap: 10px;
             }
@@ -245,8 +290,12 @@
             .input-item input {
                 width: 100%;
             }
-            .btn-danger {
-                width: 100%;
+            .remove-input-btn {
+                width: 100%; /* Make X button full width on mobile */
+                border-radius: 8px; /* Make it square again on mobile for full width */
+            }
+            .input-number {
+                text-align: left; /* Align number left on small screens */
             }
         }
     </style>
@@ -283,51 +332,130 @@
             </select>
         </div>
 
-        <div id="identifiers-container" class="form-group">
-            <label>Enter Identifiers (URL, Username, or Hashtag):</label>
-            <div class="input-item">
-                <input type="text" class="identifier-input" placeholder="e.g., URL, username, #hashtag">
-                <button class="btn btn-danger remove-input-btn" onclick="removeInputField(this)">Remove</button>
+        <button id="toggleInputModeBtn" onclick="toggleInputMode()">Bulk Edit</button>
+
+        <div id="individualInputsContainer">
+            <div id="identifiers-container" class="form-group">
+                <label>Enter Identifiers:</label>
+                <!-- Initial input field will be added by JS -->
+            </div>
+            <div class="individual-input-actions">
+                <button class="btn btn-secondary" onclick="addInputField()">+ Add</button>
+                <button class="btn btn-secondary" onclick="removeEmptyFields()">Remove empty fields</button>
+            </div>
+        </div>
+
+        <div id="bulkInputContainer" style="display: none;">
+            <div class="form-group">
+                <label for="bulkIdentifiers">Paste Identifiers (one per line):</label>
+                <textarea id="bulkIdentifiers" placeholder="e.g.,
+username1
+https://example.com/post/abc
+#hashtag"></textarea>
             </div>
         </div>
 
         <div class="button-group">
-            <button class="btn btn-secondary" onclick="addInputField()">Add More Input</button>
             <button class="btn btn-primary" onclick="fetchInfo()">Get Info</button>
             <button class="btn btn-success" onclick="downloadCSV()" id="downloadCsvBtn" style="display: none;">Download as CSV</button>
         </div>
     </div>
 
     <div id="result-container">
-        <div class="initial-message">Enter details and click 'Get Info' to see results.</div>
+        <div class="initial-message">Select an info type, enter identifiers, and click 'Get Info' to see results.</div>
     </div>
 
     <script>
         let fetchedData = []; // Stores the last fetched data for CSV download
+        let currentInputMode = 'individual'; // State variable to track current mode
 
-        // Function to add a new input field
-        function addInputField() {
+        // Function to toggle between individual and bulk input fields
+        function toggleInputMode() {
+            const individualContainer = document.getElementById('individualInputsContainer');
+            const bulkContainer = document.getElementById('bulkInputContainer');
+            const toggleButton = document.getElementById('toggleInputModeBtn');
+            const bulkTextArea = document.getElementById('bulkIdentifiers');
+            const individualInputs = document.querySelectorAll('.identifier-input');
+
+            if (currentInputMode === 'individual') {
+                // Switching to BULK mode
+                let allIdentifiers = [];
+                individualInputs.forEach(input => {
+                    const value = input.value.trim();
+                    if (value) { // Only add non-empty values
+                        allIdentifiers.push(value);
+                    }
+                });
+                bulkTextArea.value = allIdentifiers.join('\n'); // Populate textarea
+
+                individualContainer.style.display = 'none';
+                bulkContainer.style.display = 'block';
+                toggleButton.textContent = 'Back to Individual';
+                currentInputMode = 'bulk';
+            } else {
+                // Switching back to INDIVIDUAL mode
+                const bulkIdentifiers = bulkTextArea.value.split('\n').map(line => line.trim()).filter(line => line !== '');
+
+                // Clear existing individual inputs
+                const identifiersContainer = document.getElementById('identifiers-container');
+                identifiersContainer.innerHTML = ''; // Clear all input-items
+
+                // Populate with data from bulk
+                if (bulkIdentifiers.length === 0) {
+                    addInputField(); // Add one empty input if bulk was empty
+                } else {
+                    bulkIdentifiers.forEach(id => {
+                        addInputField(id); // Add inputs with pre-filled data
+                    });
+                }
+
+                individualContainer.style.display = 'block';
+                bulkContainer.style.display = 'none';
+                toggleButton.textContent = 'Bulk Edit';
+                currentInputMode = 'individual';
+                updateRemoveButtons(); // Ensure remove buttons are correct
+            }
+            displayMessage('Select an info type, enter identifiers, and click \'Get Info\' to see results.', 'initial'); // Reset message
+        }
+
+        // Function to add a new input field (can pre-fill)
+        function addInputField(prefillValue = '') {
             const container = document.getElementById('identifiers-container');
             const newInputItem = document.createElement('div');
             newInputItem.classList.add('input-item');
+
+            // Set content for the new input item
             newInputItem.innerHTML = `
-                <input type="text" class="identifier-input" placeholder="e.g., URL, username, #hashtag">
-                <button class="btn btn-danger remove-input-btn" onclick="removeInputField(this)">Remove</button>
+                <span class="input-number"></span>
+                <input type="text" class="identifier-input" placeholder="e.g., URL, username, #hashtag" value="${prefillValue}">
+                <button class="remove-input-btn" onclick="removeInputField(this)">X</button>
             `;
             container.appendChild(newInputItem);
+            updateFieldNumbers(); // Recalculate numbers for all inputs
             updateRemoveButtons(); // Update visibility of remove buttons
         }
 
         // Function to remove an input field
         function removeInputField(button) {
             const inputItem = button.closest('.input-item');
-            if (document.querySelectorAll('.identifier-input').length > 1) {
+            const allInputs = document.querySelectorAll('.identifier-input');
+
+            if (allInputs.length > 1) {
                 inputItem.remove();
+                updateFieldNumbers(); // Recalculate numbers after removal
             } else {
-                // Optionally clear content if only one input remains
+                // If only one input remains, clear its value instead of removing it
                 inputItem.querySelector('.identifier-input').value = '';
             }
-            updateRemoveButtons();
+            updateRemoveButtons(); // Update visibility of remove buttons
+        }
+
+        // Function to update the numbering of input fields
+        function updateFieldNumbers() {
+            const inputNumbers = document.querySelectorAll('.input-number');
+            inputNumbers.forEach((span, index) => {
+                span.textContent = index + 1;
+            });
         }
 
         // Function to hide/show remove buttons based on input count
@@ -339,8 +467,41 @@
                 removeButtons.forEach(btn => btn.style.display = 'inline-flex'); // Show if more than one
             }
         }
-        // Initialize state on load
-        document.addEventListener('DOMContentLoaded', updateRemoveButtons);
+
+        // Function to remove empty individual input fields
+        function removeEmptyFields() {
+            const identifiersContainer = document.getElementById('identifiers-container');
+            const inputItems = identifiersContainer.querySelectorAll('.input-item');
+            let removedCount = 0;
+            let currentInputs = [];
+
+            inputItems.forEach(item => {
+                const input = item.querySelector('.identifier-input');
+                if (input.value.trim() !== '') {
+                    currentInputs.push(item); // Keep non-empty ones
+                } else {
+                    removedCount++;
+                }
+            });
+
+            // If all fields were empty, or became empty after removal, ensure at least one empty field remains
+            if (currentInputs.length === 0) {
+                 identifiersContainer.innerHTML = ''; // Clear all
+                 addInputField(); // Add one fresh empty field
+            } else {
+                identifiersContainer.innerHTML = ''; // Clear all
+                currentInputs.forEach(item => identifiersContainer.appendChild(item)); // Re-add only the non-empty ones
+            }
+
+            updateFieldNumbers(); // Re-number after potential removals
+            updateRemoveButtons(); // Update button visibility
+            
+            if (removedCount > 0) {
+                displayMessage(`${removedCount} empty field(s) removed.`, 'initial');
+            } else {
+                displayMessage('No empty fields to remove.', 'initial');
+            }
+        }
 
 
         function displayMessage(message, type = 'initial') {
@@ -437,10 +598,20 @@
 
         async function fetchInfo() {
             const infoType = document.getElementById('infoType').value;
-            const identifierInputs = document.querySelectorAll('.identifier-input');
-            let identifiers = Array.from(identifierInputs)
+            let identifiers = [];
+
+            // Determine which input method is currently active
+            if (currentInputMode === 'bulk') {
+                const bulkText = document.getElementById('bulkIdentifiers').value;
+                identifiers = bulkText.split('\n')
+                                     .map(line => line.trim())
+                                     .filter(line => line !== '');
+            } else { // 'individual'
+                const identifierInputs = document.querySelectorAll('.identifier-input');
+                identifiers = Array.from(identifierInputs)
                                  .map(input => input.value.trim())
-                                 .filter(value => value !== ''); // Get all non-empty identifiers
+                                 .filter(value => value !== '');
+            }
 
             if (identifiers.length === 0) {
                 displayMessage('Please enter at least one identifier.', 'error');
@@ -522,6 +693,14 @@
             link.click();
             document.body.removeChild(link);
         }
+
+        // Initialize state on DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // Add one initial input field when the page loads in individual mode
+            addInputField();
+            // Ensure correct visibility and remove button state
+            toggleInputMode(); // This will default to individual mode and hide bulk
+        });
     </script>
 
 </body>
