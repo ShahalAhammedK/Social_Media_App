@@ -262,6 +262,79 @@
             box-shadow: 0 5px 10px rgba(0,0,0,0.15);
         }
 
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6); /* Semi-transparent black background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000; /* Ensure modal is on top of everything */
+        }
+        .modal-content {
+            background: #ffffff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+            width: 90%;
+            max-width: 500px; /* Max width for the modal */
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #e0e6ed;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .modal-header h3 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 1.5em;
+        }
+        .modal-close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: #607d8b;
+            padding: 0;
+        }
+        .modal-close-btn:hover {
+            color: #ef5350;
+        }
+        .modal-textarea {
+            width: calc(100% - 24px); /* Adjusted for padding */
+            min-height: 200px;
+            resize: vertical;
+            font-family: 'Inter', sans-serif;
+            font-size: 1em;
+            padding: 12px;
+            border: 1px solid #cdd5df;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e6ed;
+        }
+        .modal-item-count {
+            text-align: right;
+            font-size: 0.9em;
+            color: #607d8b;
+        }
+
 
         /* Responsive adjustments */
         @media (max-width: 768px) {
@@ -296,6 +369,9 @@
             }
             .input-number {
                 text-align: left; /* Align number left on small screens */
+            }
+            .modal-content {
+                width: 95%; /* Adjust modal width for smaller screens */
             }
         }
     </style>
@@ -332,7 +408,8 @@
             </select>
         </div>
 
-        <button id="toggleInputModeBtn" onclick="toggleInputMode()">Bulk Edit</button>
+        <!-- This button will now open the modal -->
+        <button id="toggleInputModeBtn" class="btn btn-secondary" onclick="openBulkEditModal()">Bulk Edit</button>
 
         <div id="individualInputsContainer">
             <div id="identifiers-container" class="form-group">
@@ -342,18 +419,11 @@
             <div class="individual-input-actions">
                 <button class="btn btn-secondary" onclick="addInputField()">+ Add</button>
                 <button class="btn btn-secondary" onclick="removeEmptyFields()">Remove empty fields</button>
+                <button class="btn btn-secondary" onclick="removeAllFields()">Remove all fields</button> <!-- NEW BUTTON -->
             </div>
         </div>
-
-        <div id="bulkInputContainer" style="display: none;">
-            <div class="form-group">
-                <label for="bulkIdentifiers">Paste Identifiers (one per line):</label>
-                <textarea id="bulkIdentifiers" placeholder="e.g.,
-username1
-https://example.com/post/abc
-#hashtag"></textarea>
-            </div>
-        </div>
+        
+        <!-- The bulk input container is now replaced by the modal -->
 
         <div class="button-group">
             <button class="btn btn-primary" onclick="fetchInfo()">Get Info</button>
@@ -365,58 +435,93 @@ https://example.com/post/abc
         <div class="initial-message">Select an info type, enter identifiers, and click 'Get Info' to see results.</div>
     </div>
 
+    <!-- Bulk Edit Modal Structure -->
+    <div id="bulkEditModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Bulk Edit</h3>
+                <button class="modal-close-btn" onclick="closeBulkEditModal()">X</button>
+            </div>
+            <p>Paste items separated by new line.</p>
+            <textarea id="modalBulkIdentifiers" class="modal-textarea" 
+                      placeholder="e.g.,
+username1
+https://example.com/post/abc
+#hashtag"></textarea>
+            <div class="modal-item-count" id="modalItemCount">0 items</div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeBulkEditModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="setBulkIdentifiers()">Set</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let fetchedData = []; // Stores the last fetched data for CSV download
-        let currentInputMode = 'individual'; // State variable to track current mode
 
-        // Function to toggle between individual and bulk input fields
-        function toggleInputMode() {
-            const individualContainer = document.getElementById('individualInputsContainer');
-            const bulkContainer = document.getElementById('bulkInputContainer');
-            const toggleButton = document.getElementById('toggleInputModeBtn');
-            const bulkTextArea = document.getElementById('bulkIdentifiers');
+        // Function to open the bulk edit modal
+        function openBulkEditModal() {
+            const modal = document.getElementById('bulkEditModal');
+            const bulkTextArea = document.getElementById('modalBulkIdentifiers');
             const individualInputs = document.querySelectorAll('.identifier-input');
+            const modalItemCount = document.getElementById('modalItemCount');
 
-            if (currentInputMode === 'individual') {
-                // Switching to BULK mode
-                let allIdentifiers = [];
-                individualInputs.forEach(input => {
-                    const value = input.value.trim();
-                    if (value) { // Only add non-empty values
-                        allIdentifiers.push(value);
-                    }
-                });
-                bulkTextArea.value = allIdentifiers.join('\n'); // Populate textarea
-
-                individualContainer.style.display = 'none';
-                bulkContainer.style.display = 'block';
-                toggleButton.textContent = 'Back to Individual';
-                currentInputMode = 'bulk';
-            } else {
-                // Switching back to INDIVIDUAL mode
-                const bulkIdentifiers = bulkTextArea.value.split('\n').map(line => line.trim()).filter(line => line !== '');
-
-                // Clear existing individual inputs
-                const identifiersContainer = document.getElementById('identifiers-container');
-                identifiersContainer.innerHTML = ''; // Clear all input-items
-
-                // Populate with data from bulk
-                if (bulkIdentifiers.length === 0) {
-                    addInputField(); // Add one empty input if bulk was empty
-                } else {
-                    bulkIdentifiers.forEach(id => {
-                        addInputField(id); // Add inputs with pre-filled data
-                    });
+            // Populate modal textarea with current individual inputs
+            let allIdentifiers = [];
+            individualInputs.forEach(input => {
+                const value = input.value.trim();
+                if (value) {
+                    allIdentifiers.push(value);
                 }
+            });
+            bulkTextArea.value = allIdentifiers.join('\n');
+            updateModalItemCount(); // Update initial count
 
-                individualContainer.style.display = 'block';
-                bulkContainer.style.display = 'none';
-                toggleButton.textContent = 'Bulk Edit';
-                currentInputMode = 'individual';
-                updateRemoveButtons(); // Ensure remove buttons are correct
-            }
-            displayMessage('Select an info type, enter identifiers, and click \'Get Info\' to see results.', 'initial'); // Reset message
+            // Add event listener for real-time count update as user types in modal
+            bulkTextArea.removeEventListener('input', updateModalItemCount); // Prevent multiple listeners
+            bulkTextArea.addEventListener('input', updateModalItemCount);
+
+            modal.style.display = 'flex'; // Show the modal
         }
+
+        // Function to close the bulk edit modal
+        function closeBulkEditModal() {
+            const modal = document.getElementById('bulkEditModal');
+            modal.style.display = 'none'; // Hide the modal
+        }
+
+        // Function to update item count in the modal
+        function updateModalItemCount() {
+            const bulkTextArea = document.getElementById('modalBulkIdentifiers');
+            const modalItemCount = document.getElementById('modalItemCount');
+            const identifiers = bulkTextArea.value.split('\n')
+                                                .map(line => line.trim())
+                                                .filter(line => line !== '');
+            modalItemCount.textContent = `${identifiers.length} item${identifiers.length === 1 ? '' : 's'}`;
+        }
+
+        // Function to set bulk identifiers from modal to individual inputs
+        function setBulkIdentifiers() {
+            const bulkTextArea = document.getElementById('modalBulkIdentifiers');
+            const bulkIdentifiers = bulkTextArea.value.split('\n')
+                                                    .map(line => line.trim())
+                                                    .filter(line => line !== '');
+
+            const identifiersContainer = document.getElementById('identifiers-container');
+            identifiersContainer.innerHTML = ''; // Clear all existing individual input fields
+
+            if (bulkIdentifiers.length === 0) {
+                addInputField(); // Add one empty input if bulk was empty
+            } else {
+                bulkIdentifiers.forEach(id => {
+                    addInputField(id); // Add inputs with pre-filled data
+                });
+            }
+
+            closeBulkEditModal(); // Close the modal
+            displayMessage('Identifiers updated from bulk paste. Click \'Get Info\' to fetch data.', 'initial');
+        }
+
 
         // Function to add a new input field (can pre-fill)
         function addInputField(prefillValue = '') {
@@ -424,7 +529,6 @@ https://example.com/post/abc
             const newInputItem = document.createElement('div');
             newInputItem.classList.add('input-item');
 
-            // Set content for the new input item
             newInputItem.innerHTML = `
                 <span class="input-number"></span>
                 <input type="text" class="identifier-input" placeholder="e.g., URL, username, #hashtag" value="${prefillValue}">
@@ -444,8 +548,7 @@ https://example.com/post/abc
                 inputItem.remove();
                 updateFieldNumbers(); // Recalculate numbers after removal
             } else {
-                // If only one input remains, clear its value instead of removing it
-                inputItem.querySelector('.identifier-input').value = '';
+                inputItem.querySelector('.identifier-input').value = ''; // Clear if only one remains
             }
             updateRemoveButtons(); // Update visibility of remove buttons
         }
@@ -484,7 +587,6 @@ https://example.com/post/abc
                 }
             });
 
-            // If all fields were empty, or became empty after removal, ensure at least one empty field remains
             if (currentInputs.length === 0) {
                  identifiersContainer.innerHTML = ''; // Clear all
                  addInputField(); // Add one fresh empty field
@@ -501,6 +603,16 @@ https://example.com/post/abc
             } else {
                 displayMessage('No empty fields to remove.', 'initial');
             }
+        }
+
+        // NEW: Function to remove all fields and add one empty one
+        function removeAllFields() {
+            const identifiersContainer = document.getElementById('identifiers-container');
+            identifiersContainer.innerHTML = ''; // Clear all fields
+            addInputField(); // Add one fresh empty field
+            updateFieldNumbers(); // Update numbers
+            updateRemoveButtons(); // Update button visibility
+            displayMessage('All fields cleared. One empty field remains.', 'initial');
         }
 
 
@@ -600,19 +712,12 @@ https://example.com/post/abc
             const infoType = document.getElementById('infoType').value;
             let identifiers = [];
 
-            // Determine which input method is currently active
-            if (currentInputMode === 'bulk') {
-                const bulkText = document.getElementById('bulkIdentifiers').value;
-                identifiers = bulkText.split('\n')
-                                     .map(line => line.trim())
-                                     .filter(line => line !== '');
-            } else { // 'individual'
-                const identifierInputs = document.querySelectorAll('.identifier-input');
-                identifiers = Array.from(identifierInputs)
-                                 .map(input => input.value.trim())
-                                 .filter(value => value !== '');
-            }
-
+            // Always read from individual inputs now, as bulk paste pushes to them
+            const identifierInputs = document.querySelectorAll('.identifier-input');
+            identifiers = Array.from(identifierInputs)
+                                .map(input => input.value.trim())
+                                .filter(value => value !== '');
+            
             if (identifiers.length === 0) {
                 displayMessage('Please enter at least one identifier.', 'error');
                 return;
@@ -696,10 +801,9 @@ https://example.com/post/abc
 
         // Initialize state on DOMContentLoaded
         document.addEventListener('DOMContentLoaded', () => {
-            // Add one initial input field when the page loads in individual mode
-            addInputField();
-            // Ensure correct visibility and remove button state
-            toggleInputMode(); // This will default to individual mode and hide bulk
+            addInputField(); // Add one initial input field
+            updateFieldNumbers(); // Ensure initial number is correct
+            updateRemoveButtons(); // Ensure initial remove button visibility
         });
     </script>
 
