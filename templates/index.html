@@ -5,16 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Social Media Info Fetcher</title>
     <style>
+        /* Vivo Color Palette */
+        :root {
+            --vivo-blue: rgb(30, 70, 230); /* R30 G70 B230 - Primary */
+            --dark-blue: rgb(6, 23, 94);   /* R6 G23 B94 - Secondary Dark */
+            --light-blue: rgb(209, 235, 254); /* R209 G235 B254 - Secondary Light */
+            --white: rgb(255, 255, 255);
+            --gray: rgb(230, 230, 230);    /* R230 G230 B230 */
+            --black: rgb(0, 0, 0);
+        }
+
         body {
             font-family: 'Inter', sans-serif; /* Using Inter font as per guidelines */
             padding: 30px;
-            background-color: #eef1f5; /* Light blue-grey background */
+            background-color: var(--light-blue); /* Light blue background */
             display: flex;
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
             margin: 0;
-            color: #333;
+            color: var(--dark-blue); /* Darker text for body */
             position: relative; /* Needed for absolute positioning of logo */
         }
         .logo-container {
@@ -30,7 +40,7 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.08); /* Subtle shadow for the logo */
         }
         h1 {
-            color: #2c3e50; /* Darker, formal text color */
+            color: var(--dark-blue); /* Darker, formal text color */
             margin-bottom: 30px;
             font-size: 2.8em; /* Slightly larger heading */
             text-align: center;
@@ -38,7 +48,7 @@
             padding-top: 20px; /* Add padding to prevent overlap with logo */
         }
         .controls {
-            background-color: #ffffff;
+            background-color: var(--white);
             padding: 30px;
             border-radius: 12px; /* More rounded corners */
             box-shadow: 0 6px 20px rgba(0,0,0,0.08); /* Softer, deeper shadow */
@@ -56,12 +66,12 @@
         label {
             margin-bottom: 8px;
             font-weight: 600; /* More formal bold */
-            color: #4a657e; /* Blue-grey label color */
+            color: var(--dark-blue); /* Blue-grey label color */
             font-size: 1.05em; /* Slightly smaller for formality */
         }
         select, input[type="text"], textarea { /* Added textarea */
             padding: 12px;
-            border: 1px solid #cdd5df; /* Softer border color */
+            border: 1px solid var(--gray); /* Softer border color */
             border-radius: 8px; /* Rounded corners */
             font-size: 1em; /* Standard font size */
             width: calc(100% - 24px); /* Account for padding */
@@ -69,8 +79,8 @@
             transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
         select:focus, input[type="text"]:focus, textarea:focus { /* Added textarea */
-            border-color: #2c73d2; /* Primary blue focus */
-            box-shadow: 0 0 0 3px rgba(44, 115, 210, 0.25); /* Blue glow on focus */
+            border-color: var(--vivo-blue); /* Primary blue focus */
+            box-shadow: 0 0 0 3px rgba(30, 70, 230, 0.25); /* Blue glow on focus */
             outline: none;
         }
         textarea {
@@ -105,26 +115,26 @@
             font-weight: 500; /* Medium weight for text */
         }
         .btn-primary {
-            background-color: #2c73d2; /* Primary formal blue */
-            color: white;
+            background-color: var(--vivo-blue); /* Primary formal blue */
+            color: var(--white);
         }
         .btn-primary:hover {
-            background-color: #225a9f; /* Darker blue on hover */
+            background-color: var(--dark-blue); /* Darker blue on hover */
             transform: translateY(-2px);
             box-shadow: 0 5px 10px rgba(0,0,0,0.15); /* More pronounced shadow on hover */
         }
         .btn-secondary { /* Re-added for "Add More Input" */
-            background-color: #607d8b; /* Blue-grey secondary color */
-            color: white;
+            background-color: var(--dark-blue); /* Dark Blue secondary color */
+            color: var(--white);
         }
         .btn-secondary:hover { /* Re-added for "Add More Input" */
-            background-color: #455a64; /* Darker blue-grey on hover */
+            background-color: var(--vivo-blue); /* Vivo Blue on hover */
             transform: translateY(-2px);
             box-shadow: 0 5px 10px rgba(0,0,0,0.15);
         }
         .remove-input-btn { /* Style for the 'X' button */
             background-color: #ef5350; /* Soft red for danger */
-            color: white;
+            color: var(--white);
             width: 30px; /* Make it square */
             height: 30px; /* Make it square */
             border-radius: 50%; /* Make it round */
@@ -142,8 +152,8 @@
             transform: none; /* No translateY for this small button */
         }
         .btn-success {
-            background-color: #4CAF50; /* Green for success/download */
-            color: white;
+            background-color: #4CAF50; /* Green for success/download (kept as is for contrast) */
+            color: var(--white);
         }
         .btn-success:hover {
             background-color: #43A047; /* Darker green on hover */
@@ -161,10 +171,10 @@
             margin-top: 20px; /* Adjusted margin */
             width: 100%;
             max-width: 900px; /* Wider for tables */
-            background-color: #ffffff; /* White background for table */
+            background-color: var(--white); /* White background for table */
             border-radius: 12px;
             box-shadow: 0 6px 20px rgba(0,0,0,0.08);
-            overflow-x: hidden; /* Changed to hidden here to allow wrapper to handle */
+            /* Removed overflow-x: hidden; to allow child scrolling */
             padding: 20px; /* Padding around the table */
             min-height: 100px; /* Ensure it's visible even when empty */
             display: flex;
@@ -183,50 +193,51 @@
             border-collapse: collapse; /* Remove space between table cells */
         }
         #result-table th, #result-table td {
-            border: 1px solid #e0e6ed; /* Softer border for table cells */
+            border: 1px solid var(--gray); /* Softer border for table cells */
             padding: 12px 15px;
             text-align: left;
             vertical-align: top; /* Align content to the top */
             white-space: nowrap; /* Prevent text wrapping in cells by default for better scrolling */
+            color: var(--black); /* Default text color for table content */
         }
         #result-table th {
-            background-color: #e0e6ed; /* Light blue-grey header background */
+            background-color: var(--gray); /* Light blue-grey header background */
             font-weight: 600; /* Medium bold for header */
-            color: #3f51b5; /* Darker blue header text */
+            color: var(--vivo-blue); /* Darker blue header text */
             position: sticky; /* Make headers sticky for scrolling */
             top: 0;
             z-index: 1; /* Ensure headers are above content */
         }
         #result-table tbody tr:nth-child(even) {
-            background-color: #f7f9fc; /* Very light blue-grey zebra striping */
+            background-color: #f7f9fc; /* Very light blue-grey zebra striping (kept as is for subtle contrast) */
         }
         #result-table tbody tr:hover {
-            background-color: #e8effa; /* Light blue on hover */
+            background-color: var(--light-blue); /* Light blue on hover */
         }
         .initial-message, .error-message, .warning-message, .loading-message, .scroll-hint-message {
             padding: 20px;
             text-align: center;
             font-size: 1.1em;
-            color: #607d8b; /* Softer grey for messages */
+            color: var(--dark-blue); /* Softer grey for messages */
         }
         .error-message {
-            color: #c62828; /* Darker red for errors */
+            color: #c62828; /* Darker red for errors (kept as is) */
             font-weight: bold;
         }
         .warning-message {
-            color: #ef6c00; /* Darker orange for warnings */
+            color: #ef6c00; /* Darker orange for warnings (kept as is) */
             font-weight: bold;
         }
         .loading-message {
-            color: #1976d2; /* Darker blue for loading */
+            color: var(--vivo-blue); /* Darker blue for loading */
             font-weight: bold;
         }
         .scroll-hint-message {
             font-size: 0.9em;
-            color: #8c9eff; /* Light blue hint */
+            color: var(--dark-blue); /* Light blue hint */
             margin-top: 10px;
             padding: 5px 15px;
-            background-color: #eef1f5;
+            background-color: var(--light-blue);
             border-radius: 5px;
         }
         .input-number { /* Styling for the number next to input fields */
@@ -234,7 +245,7 @@
             width: 25px; /* Fixed width for number */
             text-align: right;
             font-weight: bold;
-            color: #4a657e;
+            color: var(--dark-blue);
         }
         .individual-input-actions { /* Container for Add and Remove Empty buttons */
             display: flex;
@@ -251,13 +262,13 @@
             border-radius: 8px;
             transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
             box-shadow: 0 3px 6px rgba(0,0,0,0.1);
-            background-color: #607d8b; /* Secondary color for this toggle */
-            color: white;
+            background-color: var(--dark-blue); /* Secondary color for this toggle */
+            color: var(--white);
             font-weight: 500;
             margin-bottom: 15px; /* Space below the button */
         }
         #toggleInputModeBtn:hover {
-            background-color: #455a64;
+            background-color: var(--vivo-blue);
             transform: translateY(-2px);
             box-shadow: 0 5px 10px rgba(0,0,0,0.15);
         }
@@ -276,7 +287,7 @@
             z-index: 1000; /* Ensure modal is on top of everything */
         }
         .modal-content {
-            background: #ffffff;
+            background: var(--white);
             padding: 25px;
             border-radius: 12px;
             box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
@@ -291,13 +302,13 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #e0e6ed;
+            border-bottom: 1px solid var(--gray);
             padding-bottom: 10px;
             margin-bottom: 10px;
         }
         .modal-header h3 {
             margin: 0;
-            color: #2c3e50;
+            color: var(--dark-blue);
             font-size: 1.5em;
         }
         .modal-close-btn {
@@ -305,11 +316,11 @@
             border: none;
             font-size: 1.5em;
             cursor: pointer;
-            color: #607d8b;
+            color: var(--dark-blue);
             padding: 0;
         }
         .modal-close-btn:hover {
-            color: #ef5350;
+            color: #ef5350; /* Red for close button hover */
         }
         .modal-textarea {
             width: calc(100% - 24px); /* Adjusted for padding */
@@ -318,7 +329,7 @@
             font-family: 'Inter', sans-serif;
             font-size: 1em;
             padding: 12px;
-            border: 1px solid #cdd5df;
+            border: 1px solid var(--gray);
             border-radius: 8px;
             box-sizing: border-box;
         }
@@ -327,12 +338,12 @@
             justify-content: flex-end;
             gap: 10px;
             padding-top: 10px;
-            border-top: 1px solid #e0e6ed;
+            border-top: 1px solid var(--gray);
         }
         .modal-item-count {
             text-align: right;
             font-size: 0.9em;
-            color: #607d8b;
+            color: var(--dark-blue);
         }
 
 
