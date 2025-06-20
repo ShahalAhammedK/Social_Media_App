@@ -131,7 +131,8 @@ def fetch_youtube_post_info(video_url): # Function name remains as provided
 
     # Extract channel ID to construct Channel URL
     channel_id = safe_get(author_info, 'channelId')
-    channel_url = f"[https://www.youtube.com/channel/](https://www.youtube.com/channel/){channel_id}" if channel_id != "N/A" else "N/A"
+    # MODIFIED: Construct Channel URL in the requested format
+    channel_url = f"https://www.youtube.com/channel/{channel_id}" if channel_id != "N/A" else "N/A"
 
     # Duration is directly available in 'lengthSeconds'
     video_duration_seconds = safe_get(response_json, 'lengthSeconds')
@@ -168,10 +169,10 @@ def fetch_youtube_post_info(video_url): # Function name remains as provided
 if __name__ == "__main__":
     # Define multiple YouTube Video URLs in a list
     youtube_video_urls_to_process = [
-        "[https://www.youtube.com/watch?v=dQw4w9WgXcQ](https://www.youtube.com/watch?v=dQw4w9WgXcQ)", # Rick Astley - Never Gonna Give You Up
-        "[https://www.youtube.com/watch?v=yYn9d-21p5I](https://www.youtube.com/watch?v=yYn9d-21p5I)", # Example with comments
-        "[https://www.youtube.com/watch?v=invalid_id_xyz](https://www.youtube.com/watch?v=invalid_id_xyz)", # Example of an invalid ID
-        "[https://youtu.be/qQYfA3I_g8E](https://youtu.be/qQYfA3I_g8E)" # Shortened URL example
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ", # Rick Astley - Never Gonna Give You Up
+        "https://www.youtube.com/watch?v=yYn9d-21p5I", # Example with comments
+        "https://www.youtube.com/watch?v=invalid_id_xyz", # Example of an invalid ID
+        "https://youtu.be/qQYfA3I_g8E" # Shortened URL example
     ]
 
     # List to store all video data rows for tabulate display
