@@ -1,130 +1,115 @@
 # scrapers/fetch_tiktok_profile_info.py
-import http.client
 import urllib.parse
 import json
-from datetime import datetime # For formatting timestamps, even if not heavily used here
 import re # For extracting username from URLs
 
 # Assuming utils.py is in the same directory or accessible via package import
-from .utils import safe_get, format_timestamp
+from .utils import safe_get, format_timestamp, make_api_request
 from .api_key_manager import rapidapi_key_manager # Import the key manager
 
 # --- Configuration (Host specific to this TikTok API) ---
-RAPIDAPI_HOST_TIKTOK = "tiktok-api6.p.rapidapi.com" # Updated API host for this specific endpoint
+RAPIDAPI_HOST_TIKTOK = "tiktok-scraper7.p.rapidapi.com" # Updated API host based on user's snippet
 
-def fetch_tiktok_profile_info(profile_identifier): # Renamed 'username' to 'profile_identifier'
+def extract_tiktok_identifier(profile_identifier):
     """
-    Fetches detailed information for a TikTok user profile using their username or URL,
-    implementing API key rotation for resilience against rate limits or invalid keys.
-    Returns a dictionary of extracted details or an error dictionary if fetching fails.
+    Extracts the TikTok username from a URL or determines if the input is already a username.
+    Returns the cleaned username or None if extraction fails.
     """
-    
-    # Determine if the identifier is a URL or a username
-    username_for_api = profile_identifier
+    cleaned_username = profile_identifier
     if profile_identifier.startswith("http"):
         # Regex to extract username from standard TikTok profile URLs
         match = re.search(r'(?:tiktok\.com\/@)([a-zA-Z0-9_\.]+)', profile_identifier)
         if match:
-            username_for_api = match.group(1).replace('/', '') # Clean up potential trailing slash
+            cleaned_username = match.group(1).replace('/', '') # Clean up potential trailing slash
         else:
-            print(f"Error: Could not extract username from URL: {profile_identifier}. Skipping.")
-            return {"error": f"Could not extract username from URL: {profile_identifier}"}
+            print(f"Error: Could not extract username from URL: {profile_identifier}.")
+            return None
+    return cleaned_username
 
-    # --- API Request with Key Rotation Loop ---
-    # This loop attempts to fetch data, rotating API keys if a failure occurs due to
-    # rate limits, invalid keys, or other transient errors.
+
+def fetch_tiktok_profile_info(profile_identifier):
+    """
+    Fetches detailed information for a TikTok user profile using their username or URL,
+    implementing API key rotation for resilience against rate limits or invalid keys.
+    This version uses the 'tiktok-scraper7.p.rapidapi.com' API.
+    Returns a dictionary of extracted details or an error dictionary if fetching fails.
+    """
+    
+    username_for_api = extract_tiktok_identifier(profile_identifier)
+
+    if not username_for_api:
+        return {"error": f"Could not extract a valid TikTok username from: {profile_identifier}"}
+
+    # --- API Request with Key Rotation Loop (using make_api_request) ---
+    response_json = None
     for _ in range(rapidapi_key_manager.max_key_rotations):
-        conn = None # Initialize conn to None at the start of each loop iteration
-        try:
-            # Get headers with the current active API key and the specific host for TikTok
-            current_headers = rapidapi_key_manager.get_headers(RAPIDAPI_HOST_TIKTOK)
-            
-            # Properly encode the username for the GET request URL
-            encoded_username = urllib.parse.quote(username_for_api)
+        # Get headers with the current active API key and the specific host for TikTok
+        current_headers = rapidapi_key_manager.get_headers(RAPIDAPI_HOST_TIKTOK)
+        
+        # Properly encode the username for the GET request URL
+        encoded_username = urllib.parse.quote(username_for_api)
 
-            # Request user details using the new GET endpoint structure
-            endpoint = f"/user/details?username={encoded_username}"
-            
-            # Establish an HTTPS connection to the RapidAPI host
-            conn = http.client.HTTPSConnection(RAPIDAPI_HOST_TIKTOK)
-            # Send the GET request
-            conn.request("GET", endpoint, headers=current_headers)
-            # Get the response
-            res = conn.getresponse()
-            data = res.read() # Read the response body
+        # Request user details using the new GET endpoint and parameter name
+        endpoint = f"/user/info?unique_id={encoded_username}" # Updated endpoint and parameter
+        
+        # Make the API request using the centralized helper function
+        response_json = make_api_request(
+            host=RAPIDAPI_HOST_TIKTOK,
+            endpoint=endpoint,
+            headers=current_headers
+        )
 
-            # Decode the raw API response from bytes to a UTF-8 string
-            raw_response_str = data.decode("utf-8")
-            response_json = json.loads(raw_response_str)
-
-            # Check HTTP status codes and API-specific error messages for key rotation triggers
-            error_message_from_api = safe_get(response_json, 'message', safe_get(response_json, 'error', safe_get(response_json, 'reason', '')))
+        # Check if make_api_request returned an error (it returns a dict with 'error' key)
+        if isinstance(response_json, dict) and "error" in response_json:
+            error_msg = response_json["error"].lower()
             
-            # 429 status code indicates Too Many Requests (Rate Limit)
-            if res.status == 429:
-                print(f"Rate limit hit with current key (index: {rapidapi_key_manager.current_key_index}) for TikTok API. Rotating key...")
-                # Attempt to rotate to the next key. If no more keys, return error.
+            # Check for specific error messages that indicate key rotation is needed
+            if "timed out" in error_msg:
+                print(f"Request timed out for TikTok API. Retrying with next key...")
                 if not rapidapi_key_manager.rotate_key():
-                    return {"error": "All RapidAPI keys exhausted or invalid for TikTok rate limit."}
-                continue # Retry the request with the new key in the next iteration
-
-            # Check for messages indicating invalid key or subscription issues, or 401/403 status
-            elif ("not subscribed" in str(error_message_from_api).lower() or 
-                  "invalid api key" in str(error_message_from_api).lower() or 
-                  res.status in [401, 403]):
-                print(f"Current key (index: {rapidapi_key_manager.current_key_index}) invalid or subscription issue for TikTok API. Rotating key...")
-                # Attempt to rotate to the next key. If no more keys, return error.
+                    return {"error": "All RapidAPI keys exhausted due to timeouts for TikTok."}
+                continue # Retry with next key
+            elif ("not subscribed" in error_msg or 
+                  "invalid api key" in error_msg or 
+                  "401" in error_msg or # Status code embedded in error message
+                  "403" in error_msg): # Status code embedded in error message
+                print(f"Current key invalid or subscription issue for TikTok API. Rotating key...")
                 if not rapidapi_key_manager.rotate_key():
                     return {"error": "All RapidAPI keys exhausted or invalid for TikTok subscription/authentication."}
-                continue # Retry the request with the new key
+                continue # Retry with new key
+            elif "429" in error_msg: # Rate limit error embedded in message
+                 print(f"Rate limit hit with current key for TikTok API. Rotating key...")
+                 if not rapidapi_key_manager.rotate_key():
+                    return {"error": "All RapidAPI keys exhausted or invalid for TikTok rate limit."}
+                 continue # Retry with new key
+            else:
+                # Other general API errors (e.g., 404 not found for a valid key)
+                print(f"TikTok API Error for {profile_identifier}: {response_json['error']}")
+                return response_json # Return the error directly
 
-            # If it's not a 200 OK and not a key/rate limit issue, it's a general API error
-            elif res.status != 200:
-                print(f"TikTok API Error {res.status}: {error_message_from_api}. Not a rate limit, returning error.")
-                return {"error": f"TikTok API Error {res.status}: {error_message_from_api}"}
-            
-            # Check for a fundamental key to indicate valid data from the API response
-            if not response_json.get('username'):
-                final_api_error_message = error_message_from_api if error_message_from_api else 'Unknown error from TikTok API.'
-                print(f"API returned an error for {profile_identifier}: {final_api_error_message}") # Use original identifier for error
-                return {"error": f"TikTok API returned an error for {profile_identifier}: {final_api_error_message}"}
-
+        else:
+            # If no error from make_api_request, check if the API response itself is valid data
+            # The new API might return a 'data' key containing the actual user info
+            user_data = safe_get(response_json, 'data') 
+            if not user_data or not safe_get(user_data, 'user.uniqueId'): # Check for a fundamental key to indicate valid data
+                final_api_error_message = safe_get(response_json, 'message', safe_get(response_json, 'error', safe_get(response_json, 'reason', 'No valid data or specific error message from API.')))
+                print(f"API returned no valid data for {profile_identifier}. Full response: {response_json}")
+                return {"error": f"TikTok API returned no valid data for {profile_identifier}: {final_api_error_message}"}
             break # Exit loop if the request was successful and data is valid
-
-        except http.client.HTTPException as e:
-            # Catch HTTP connection errors (e.g., host unreachable)
-            print(f"HTTP connection error for {profile_identifier}: {e}. Retrying with next key...")
-            if not rapidapi_key_manager.rotate_key():
-                return {"error": "All RapidAPI keys exhausted due to HTTP connection errors for TikTok."}
-            continue # Retry with next key
-        except json.JSONDecodeError:
-            # Catch errors if the response is not valid JSON
-            print(f"Error for {profile_identifier}: Could not decode JSON response from TikTok API. Raw response: {raw_response_str}. Retrying with next key...")
-            if not rapidapi_key_manager.rotate_key():
-                return {"error": "All RapidAPI keys exhausted due to invalid JSON responses from TikTok API."}
-            continue # Retry with next key
-        except Exception as e:
-            # Catch any other unexpected errors
-            print(f"An unexpected error occurred for TikTok profile {profile_identifier}: {e}. Retrying with next key...")
-            if not rapidapi_key_manager.rotate_key():
-                return {"error": f"All RapidAPI keys exhausted due to unexpected errors with TikTok API: {str(e)}"}
-            continue # Retry with next key
-        finally:
-            # Ensure the HTTP connection is closed whether the request succeeded or failed
-            if conn:
-                conn.close()
     else: # This 'else' block is for the 'for' loop. It executes if the loop completes without a 'break'.
         return {"error": "Failed to fetch TikTok profile info after trying all available API keys."}
 
     # --- Data Extraction (executed only if API call was successful and loop broke) ---
-    # If we reach this point, it means the API call was successful and `response_json` contains valid data.
-    # Extract profile information using safe_get for robustness
-    profile_username = safe_get(response_json, 'username')
-    nickname = safe_get(response_json, 'nickname')
-    follower_count = safe_get(response_json, 'followers')
-    following_count = safe_get(response_json, 'following')
-    total_likes_received = safe_get(response_json, 'total_heart')
-    posts_count = safe_get(response_json, 'total_videos')
+    # The new API structure appears to nest user info under a 'data' key
+    profile_data_user = safe_get(response_json, 'data.user')
+    profile_data_stats = safe_get(response_json, 'data.stats')
+
+    profile_username = safe_get(profile_data_user, 'uniqueId') # Changed from 'username' to 'uniqueId' based on new API
+    nickname = safe_get(profile_data_user, 'nickname')
+    follower_count = safe_get(profile_data_stats, 'followerCount') # Extracted from data.stats
+    following_count = safe_get(profile_data_stats, 'followingCount') # Extracted from data.stats
+    total_likes_received = safe_get(profile_data_stats, 'heartCount') # Extracted from data.stats
+    posts_count = safe_get(profile_data_stats, 'videoCount') # Extracted from data.stats
 
     # Construct a basic profile URL
     profile_url = f"https://www.tiktok.com/@{profile_username}" if profile_username != "N/A" else "N/A"
