@@ -1,76 +1,29 @@
+# scrapers/fetch_youtube_post_info.py
 import http.client
 import urllib.parse
 import json
+import re
 from datetime import datetime # For formatting timestamps
-from tabulate import tabulate # For pretty printing tables
-import re # For extracting video ID from URLs
 from langdetect import detect, DetectorFactory # Import language detection library
 
 # Set seed for langdetect to ensure consistent results (optional but good for reproducibility)
 DetectorFactory.seed = 0
 
-# Note: If you encounter an error like "ModuleNotFoundError: No module named 'tabulate'"
-# or "ModuleNotFoundError: No module named 'langdetect'",
-# you need to install these libraries. Open your terminal or command prompt and run:
-# pip install tabulate langdetect
+# Assuming utils.py is in the same directory or accessible via package import
+from .utils import safe_get, format_timestamp
+from .api_key_manager import rapidapi_key_manager # Import the key manager
 
-# --- Configuration ---
-# YouTube API
-RAPIDAPI_KEY_YOUTUBE = "06e813f846mshd0abac9d8ccb0e0p17d5e9jsn610b6a71b016" # Your RapidAPI key for YouTube
+# --- Configuration (Host specific to this YouTube API) ---
 RAPIDAPI_HOST_YOUTUBE = "youtube-v38.p.rapidapi.com"
 
-headers_youtube = {
-    'x-rapidapi-key': RAPIDAPI_KEY_YOUTUBE,
-    'x-rapidapi-host': RAPIDAPI_HOST_YOUTUBE
-}
-
-def safe_get(data, path, default="N/A"):
+def fetch_youtube_post_info(video_url): # Function name remains as provided
     """
-    Safely retrieves a nested value from a dictionary using a dot-separated path.
-    Returns default if any key in the path is not found or if an intermediate value
-    is not a dictionary.
+    Fetches basic details for a given YouTube video URL, implementing API key rotation
+    for resilience against rate limits or invalid keys. Extracts the video ID from the URL
+    and uses it to query the API. Returns a dictionary of extracted details or an error
+    dictionary if fetching fails.
     """
-    keys = path.split(".")
-    value = data
-    for key in keys:
-        if isinstance(value, dict):
-            value = value.get(key, {})
-        else:
-            return default # Path segment not a dict, cannot go further
-    return value if value else default # Return actual value or default if empty/None
-
-def format_timestamp(ts, include_time=False):
-    """
-    Formats a Unix timestamp (or date string if already formatted) into a readable datetime string.
-    Handles 'N/A' or invalid timestamps gracefully.
-    If include_time is True, returns date and time.
-    """
-    if ts == "N/A" or not ts:
-        return "N/A"
-    try:
-        # Check if it's a Unix timestamp (int) or already a string date
-        if isinstance(ts, int) or (isinstance(ts, str) and ts.isdigit()):
-            ts_int = int(ts)
-            dt_object = datetime.utcfromtimestamp(ts_int)
-        else:
-            # Assume it's already a date string in 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' format
-            # datetime.fromisoformat can handle various ISO 8601 formats
-            dt_object = datetime.fromisoformat(ts.replace('Z', '+00:00')) # Handle 'Z' for UTC
-            
-        if include_time:
-            return dt_object.strftime('%Y-%m-%d %H:%M:%S UTC')
-        else:
-            return dt_object.strftime('%Y-%m-%d')
-    except (ValueError, TypeError, Exception):
-        return "Invalid timestamp"
-
-def fetch_youtube_post_info(video_url): # Renamed function
-    """
-    Fetches basic details for a given YouTube video URL.
-    Extracts the video ID from the URL and uses it to query the API.
-    Returns a dictionary of extracted details.
-    """
-    conn = http.client.HTTPSConnection(RAPIDAPI_HOST_YOUTUBE)
+    conn = None # Initialize conn to None to ensure it's defined for the finally block
     
     video_id = None
     # Extract video ID from the URL using regular expressions
@@ -79,92 +32,146 @@ def fetch_youtube_post_info(video_url): # Renamed function
         video_id = match.group(1)
     else:
         print(f"Error: Could not extract video ID from URL: {video_url}")
-        return None # Return None if ID extraction fails
+        return {"error": f"Could not extract video ID from URL: {video_url}"}
 
-    try:
-        # Properly encode the video ID for the GET request URL
-        encoded_video_id = urllib.parse.quote(video_id, safe='')
+    # Properly encode the video ID for the GET request URL
+    encoded_video_id = urllib.parse.quote(video_id, safe='')
+    endpoint = f"/video/details/?id={encoded_video_id}&hl=en&gl=US"
 
-        # Request video details using the GET endpoint structure
-        endpoint = f"/video/details/?id={encoded_video_id}&hl=en&gl=US"
-        conn.request("GET", endpoint, headers=headers_youtube)
+    # --- API Request with Key Rotation Loop ---
+    # This loop attempts to fetch data, rotating API keys if a failure occurs due to
+    # rate limits, invalid keys, or other transient errors.
+    for _ in range(rapidapi_key_manager.max_key_rotations):
+        try:
+            # Get headers with the current active API key and the specific host for YouTube
+            current_headers = rapidapi_key_manager.get_headers(RAPIDAPI_HOST_YOUTUBE)
+            
+            # Establish an HTTPS connection to the RapidAPI host
+            conn = http.client.HTTPSConnection(RAPIDAPI_HOST_YOUTUBE)
+            # Send the GET request
+            conn.request("GET", endpoint, headers=current_headers)
+            # Get the response
+            res = conn.getresponse()
+            data = res.read() # Read the response body
 
-        # Get response
-        res = conn.getresponse()
-        data = res.read()
+            # Decode the raw API response from bytes to a UTF-8 string
+            raw_response_str = data.decode("utf-8")
+            response_json = json.loads(raw_response_str)
 
-        # Decode the raw API response and parse the JSON
-        raw_response_str = data.decode("utf-8")
-        response_json = json.loads(raw_response_str)
+            # Check HTTP status codes and API-specific error messages for key rotation triggers
+            error_message_from_api = safe_get(response_json, 'message', safe_get(response_json, 'error', ''))
+            
+            # 429 status code indicates Too Many Requests (Rate Limit)
+            if res.status == 429:
+                print(f"Rate limit hit with current key (index: {rapidapi_key_manager.current_key_index}) for YouTube API. Rotating key...")
+                # Attempt to rotate to the next key. If no more keys, return error.
+                if not rapidapi_key_manager.rotate_key():
+                    return {"error": "All RapidAPI keys exhausted or invalid for YouTube rate limit."}
+                continue # Retry the request with the new key in the next iteration
 
-        # Check if the API call returned valid data (e.g., 'videoId' or 'title')
-        if response_json.get('videoId') or response_json.get('title'):
-            # Extract statistics and details from the provided JSON structure
-            stats_info = safe_get(response_json, 'stats', {})
-            views_count = safe_get(stats_info, 'views')
-            likes_count = safe_get(stats_info, 'likes')
-            comments_count = safe_get(stats_info, 'comments')
+            # Check for messages indicating invalid key or subscription issues, or 401/403 status
+            elif ("not subscribed" in str(error_message_from_api).lower() or 
+                  "invalid api key" in str(error_message_from_api).lower() or 
+                  res.status in [401, 403]):
+                print(f"Current key (index: {rapidapi_key_manager.current_key_index}) invalid or subscription issue for YouTube API. Rotating key...")
+                # Attempt to rotate to the next key. If no more keys, return error.
+                if not rapidapi_key_manager.rotate_key():
+                    return {"error": "All RapidAPI keys exhausted or invalid for YouTube subscription/authentication."}
+                continue # Retry the request with the new key
 
-            author_info = safe_get(response_json, 'author', {})
-            channel_name = safe_get(author_info, 'title')
+            # If it's not a 200 OK and not a key/rate limit issue, it's a general API error
+            elif res.status != 200:
+                print(f"YouTube API Error {res.status}: {error_message_from_api}. Not a rate limit, returning error.")
+                return {"error": f"YouTube API Error {res.status}: {error_message_from_api}"}
+            
+            # Check if the API call returned valid data (e.g., 'videoId' or 'title')
+            if not (response_json.get('videoId') or response_json.get('title')):
+                final_api_error_message = error_message_from_api if error_message_from_api else 'No valid data or specific error message from API.'
+                print(f"API returned no valid data or an error for Video ID {video_id}: {final_api_error_message}")
+                return {"error": f"YouTube API returned no valid data or an error for Video ID {video_id}: {final_api_error_message}"}
 
-            # Extract channel ID to construct Channel URL
-            channel_id = safe_get(author_info, 'channelId')
-            channel_url = f"https://www.youtube.com/channel/{channel_id}" if channel_id != "N/A" else "N/A"
+            break # Exit loop if the request was successful and data is valid
 
-            # Duration is directly available in 'lengthSeconds'
-            video_duration_seconds = safe_get(response_json, 'lengthSeconds')
+        except http.client.HTTPException as e:
+            # Catch HTTP connection errors (e.g., host unreachable)
+            print(f"HTTP connection error for Video ID {video_id}: {e}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": "All RapidAPI keys exhausted due to HTTP connection errors for YouTube."}
+            continue # Retry with next key
+        except json.JSONDecodeError:
+            # Catch errors if the response is not valid JSON
+            print(f"Error for Video ID {video_id}: Could not decode JSON response from YouTube API. Raw response: {raw_response_str}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": "All RapidAPI keys exhausted due to invalid JSON responses from YouTube API."}
+            continue # Retry with next key
+        except Exception as e:
+            # Catch any other unexpected errors
+            print(f"An unexpected error occurred for Video ID {video_id} with YouTube API: {e}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": f"All RapidAPI keys exhausted due to unexpected errors with YouTube API: {str(e)}"}
+            continue # Retry with next key
+        finally:
+            # Ensure the HTTP connection is closed whether the request succeeded or failed
+            if conn:
+                conn.close()
+    else:
+        # This 'else' block executes if the loop completes without a 'break' statement,
+        # meaning all available API keys were tried and failed to get a successful response.
+        return {"error": "Failed to fetch YouTube post info after trying all available API keys."}
 
-            # Published date is directly available in 'publishedDate'
-            published_date_raw = safe_get(response_json, 'publishedDate')
-            published_date_formatted = format_timestamp(published_date_raw, include_time=True) # Full timestamp
+    # --- Data Extraction (executed only if API call was successful and loop broke) ---
+    # Extract statistics and details from the provided JSON structure
+    stats_info = safe_get(response_json, 'stats', {})
+    views_count = safe_get(stats_info, 'views')
+    likes_count = safe_get(stats_info, 'likes')
+    comments_count = safe_get(stats_info, 'comments')
 
-            # Extract the video description
-            video_description = safe_get(response_json, 'description')
+    author_info = safe_get(response_json, 'author', {})
+    channel_name = safe_get(author_info, 'title')
 
-            # Detect language of the description
-            detected_description_language = "N/A" # Default if detection fails
-            if video_description and len(video_description.strip()) > 0 and video_description != "N/A":
-                try:
-                    detected_description_language = detect(video_description)
-                except Exception as e:
-                    detected_description_language = "Undetectable"
-                    print(f"  Warning: Could not detect language for video {video_id} description: {e}")
+    # Extract channel ID to construct Channel URL
+    channel_id = safe_get(author_info, 'channelId')
+    channel_url = f"[https://www.youtube.com/channel/](https://www.youtube.com/channel/){channel_id}" if channel_id != "N/A" else "N/A"
 
-            return {
-                "Views": str(views_count),
-                "Likes": str(likes_count),
-                "Comments": str(comments_count),
-                "Video URL": video_url, # Use the original full URL for the output
-                "Channel Name": channel_name,
-                "Channel URL": channel_url,
-                "Video Duration (seconds)": str(video_duration_seconds),
-                "Published Date (UTC)": published_date_formatted,
-                "Description Language": detected_description_language
-            }
-        else:
-            # Report API specific error message if available
-            error_message = safe_get(response_json, 'message', safe_get(response_json, 'error', 'No specific error message from API'))
-            print(f"API returned no valid data or an error for Video ID {video_id}: {error_message}")
-            return None
+    # Duration is directly available in 'lengthSeconds'
+    video_duration_seconds = safe_get(response_json, 'lengthSeconds')
 
-    except json.JSONDecodeError:
-        print(f"Error for Video ID {video_id}: Could not decode JSON response. The API response might not be valid JSON.")
-        return None
-    except Exception as e:
-        print(f"An unexpected error occurred for Video ID {video_id}: {e}")
-        return None
-    finally:
-        # Ensure the connection is closed
-        conn.close()
+    # Published date is directly available in 'publishedDate'
+    published_date_raw = safe_get(response_json, 'publishedDate')
+    published_date_formatted = format_timestamp(published_date_raw, include_time=True) # Full timestamp
 
-# --- Example Usage ---
+    # Extract the video description
+    video_description = safe_get(response_json, 'description')
+
+    # Detect language of the description
+    detected_description_language = "N/A" # Default if detection fails
+    if video_description and len(video_description.strip()) > 0 and video_description != "N/A":
+        try:
+            detected_description_language = detect(video_description)
+        except Exception as e:
+            detected_description_language = "Undetectable"
+            print(f"    Warning: Could not detect language for video {video_id} description: {e}")
+
+    return {
+        "Views": str(views_count),
+        "Likes": str(likes_count),
+        "Comments": str(comments_count),
+        "Video URL": video_url, # Use the original full URL for the output
+        "Channel Name": channel_name,
+        "Channel URL": channel_url,
+        "Video Duration (seconds)": str(video_duration_seconds),
+        "Published Date (UTC)": published_date_formatted,
+        "Description Language": detected_description_language
+    }
+
+# --- Example Usage (only runs when this file is executed directly) ---
 if __name__ == "__main__":
     # Define multiple YouTube Video URLs in a list
     youtube_video_urls_to_process = [
-        "https://youtu.be/HvoBci_GC8A?si=BFNrECRroBd_nWB2",
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ", # Rick Astley - Never Gonna Give You Up
-        "https://www.youtube.com/watch?v=kYtGl1JXzHg" # Example with comments
+        "[https://www.youtube.com/watch?v=dQw4w9WgXcQ](https://www.youtube.com/watch?v=dQw4w9WgXcQ)", # Rick Astley - Never Gonna Give You Up
+        "[https://www.youtube.com/watch?v=yYn9d-21p5I](https://www.youtube.com/watch?v=yYn9d-21p5I)", # Example with comments
+        "[https://www.youtube.com/watch?v=invalid_id_xyz](https://www.youtube.com/watch?v=invalid_id_xyz)", # Example of an invalid ID
+        "[https://youtu.be/qQYfA3I_g8E](https://youtu.be/qQYfA3I_g8E)" # Shortened URL example
     ]
 
     # List to store all video data rows for tabulate display
@@ -188,19 +195,28 @@ if __name__ == "__main__":
     for url in youtube_video_urls_to_process:
         print(f"\nProcessing URL: {url}")
         video_details = fetch_youtube_post_info(url) # Updated function call
-        if video_details:
+        if video_details and not video_details.get("error"): # Check for successful fetch and no error
             # Convert the dictionary output to a list based on output_headers order
             row_data_list = [video_details.get(header, 'N/A') for header in output_headers]
             collected_video_rows_for_output.append(row_data_list)
             print("Successfully extracted basic video details and detected description language.")
         else:
-            print(f"Failed to retrieve video details for {url}.")
+            # Print the error message if the fetch failed
+            error_msg = video_details.get("error", "Unknown error") if video_details else "No details retrieved."
+            print(f"Failed to retrieve video details for {url}. Error: {error_msg}")
         print("-" * 40)
 
     # Print the collected data as a formatted table
     if collected_video_rows_for_output:
         print("\n--- YouTube Video Basic Information Table ---")
-        print(tabulate(collected_video_rows_for_output, headers=output_headers, tablefmt="fancy_grid"))
+        try:
+            from tabulate import tabulate # Import tabulate here if not already at top for main guard
+            print(tabulate(collected_video_rows_for_output, headers=output_headers, tablefmt="fancy_grid"))
+        except ImportError:
+            print("Please install 'tabulate' library (pip install tabulate) to view formatted table.")
+            # Fallback to simple print if tabulate is not available
+            for row in collected_video_rows_for_output:
+                print(row)
         print("-------------------------------------------")
     else:
         print("\nNo basic video details collected for the specified YouTube videos.")
