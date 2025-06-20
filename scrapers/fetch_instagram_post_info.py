@@ -15,10 +15,14 @@ RAPIDAPI_HOST = "instagram-social-api.p.rapidapi.com" # Keep this defined here
 
 def fetch_instagram_post_info(post_identifier):
     post_shortcode = post_identifier
+    url_path_type = "p"  # Default to 'p' for posts
+
     if post_identifier.startswith("http"):
-        match = re.search(r'(?:instagram\.com\/p\/|instagram\.com\/reel\/)([a-zA-Z0-9_-]+)', post_identifier)
+        # Regex to extract shortcode and determine if it's a reel or a regular post URL
+        match = re.search(r'(?:instagram\.com\/(p|reel)\/)([a-zA-Z0-9_-]+)', post_identifier)
         if match:
-            post_shortcode = match.group(1)
+            url_path_type = match.group(1) # 'p' or 'reel'
+            post_shortcode = match.group(2)
         else:
             print(f"Error: Could not extract shortcode from URL: {post_identifier}")
             return {"error": f"Invalid Instagram post URL or identifier: {post_identifier}"}
@@ -28,7 +32,6 @@ def fetch_instagram_post_info(post_identifier):
 
     for _ in range(rapidapi_key_manager.max_key_rotations):
         try:
-            # --- MODIFIED CALL ---
             current_headers = rapidapi_key_manager.get_headers(RAPIDAPI_HOST) # Pass RAPIDAPI_HOST
             conn = http.client.HTTPSConnection(RAPIDAPI_HOST)
             conn.request("GET", endpoint, headers=current_headers)
@@ -77,7 +80,7 @@ def fetch_instagram_post_info(post_identifier):
     if not data_payload:
         return {"error": "No data payload found in API response."}
 
-    is_video = data_payload.get("is_video", False)
+    is_video = data_payload.get("is_video", False) # This indicates if the media is a video, not necessarily a 'reel' URL type.
 
     caption_text = safe_get(data_payload, "caption.text")
     likes_count = safe_get(data_payload, "metrics.like_count")
@@ -89,9 +92,9 @@ def fetch_instagram_post_info(post_identifier):
     username_val = safe_get(data_payload, "user.username")
     full_name_val = safe_get(data_payload, "user.full_name")
 
-    instagram_post_url = post_identifier
-    if not post_identifier.startswith("http"):
-        instagram_post_url = f"https://www.instagram.com/p/{post_shortcode}/"
+    # Construct the Instagram post URL using the determined url_path_type
+    instagram_post_url = f"https://www.instagram.com/{url_path_type}/{post_shortcode}/"
+
 
     author_profile_url = f"https://www.instagram.com/{username_val}/" if username_val != "N/A" else "N/A"
 
