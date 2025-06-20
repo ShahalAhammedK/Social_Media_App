@@ -1,48 +1,19 @@
+# scrapers/fetch_instagram_post_info.py
 import http.client
 import urllib.parse
 import json
-from datetime import datetime
 import re
 from langdetect import detect, DetectorFactory
 
-# Set consistent results for language detection
+from .utils import safe_get, format_timestamp
+from .api_key_manager import rapidapi_key_manager
+
 DetectorFactory.seed = 0
 
-# --- Configuration ---
-RAPIDAPI_KEY = "06e813f846mshd0abac9d8ccb0e0p17d5e9jsn610b6a71b016"  # Replace with your actual key
-RAPIDAPI_HOST = "instagram-social-api.p.rapidapi.com"
-
-headers = {
-    "x-rapidapi-key": RAPIDAPI_KEY,
-    "x-rapidapi-host": RAPIDAPI_HOST
-}
-
-def safe_get(data, path, default="N/A"):
-    keys = path.split(".")
-    value = data
-    for key in keys:
-        if isinstance(value, dict):
-            value = value.get(key, {})
-        else:
-            return default
-    return value if value else default
-
-def format_timestamp(ts, include_time=True):
-    if ts == "N/A" or not ts:
-        return "N/A"
-    try:
-        ts_int = int(ts)
-        if include_time:
-            return datetime.utcfromtimestamp(ts_int).strftime('%Y-%m-%d %H:%M:%S UTC')
-        else:
-            return datetime.utcfromtimestamp(ts_int).strftime('%Y-%m-%d')
-    except Exception:
-        return "Invalid timestamp"
+# --- Configuration (Host for Instagram API) ---
+RAPIDAPI_HOST = "instagram-social-api.p.rapidapi.com" # Keep this defined here
 
 def fetch_instagram_post_info(post_identifier):
-    conn = http.client.HTTPSConnection(RAPIDAPI_HOST)
-    
-    # Extract shortcode from URL if needed
     post_shortcode = post_identifier
     if post_identifier.startswith("http"):
         match = re.search(r'(?:instagram\.com\/p\/|instagram\.com\/reel\/)([a-zA-Z0-9_-]+)', post_identifier)
@@ -50,29 +21,65 @@ def fetch_instagram_post_info(post_identifier):
             post_shortcode = match.group(1)
         else:
             print(f"Error: Could not extract shortcode from URL: {post_identifier}")
-            return None
+            return {"error": f"Invalid Instagram post URL or identifier: {post_identifier}"}
 
     encoded_identifier = urllib.parse.quote(post_shortcode, safe='')
     endpoint = f"/v1/post_info?code_or_id_or_url={encoded_identifier}"
 
-    try:
-        conn.request("GET", endpoint, headers=headers)
-        res = conn.getresponse()
-        data = res.read()
-        json_data = json.loads(data.decode("utf-8"))
-    except Exception as e:
-        print(f"Error fetching data: {e}")
-        return None
-    finally:
-        conn.close()
+    for _ in range(rapidapi_key_manager.max_key_rotations):
+        try:
+            # --- MODIFIED CALL ---
+            current_headers = rapidapi_key_manager.get_headers(RAPIDAPI_HOST) # Pass RAPIDAPI_HOST
+            conn = http.client.HTTPSConnection(RAPIDAPI_HOST)
+            conn.request("GET", endpoint, headers=current_headers)
+            res = conn.getresponse()
+            data = res.read()
+            json_data = json.loads(data.decode("utf-8"))
+            conn.close()
+
+            error_message = json_data.get("message") or json_data.get("error")
+
+            if res.status == 429:
+                print(f"Rate limit hit with current key (index: {rapidapi_key_manager.current_key_index}). Rotating key...")
+                if not rapidapi_key_manager.rotate_key():
+                    return {"error": "All RapidAPI keys exhausted or invalid for rate limit."}
+                continue
+            elif "not subscribed" in str(error_message).lower() or "invalid api key" in str(error_message).lower() or res.status in [401, 403]:
+                print(f"Current key (index: {rapidapi_key_manager.current_key_index}) invalid or subscription issue. Rotating key...")
+                if not rapidapi_key_manager.rotate_key():
+                    return {"error": "All RapidAPI keys exhausted or invalid for subscription/authentication."}
+                continue
+            elif res.status != 200:
+                print(f"API Error {res.status}: {error_message}. Not a rate limit, returning error.")
+                return {"error": f"API Error {res.status}: {error_message}"}
+
+            break
+
+        except http.client.HTTPException as e:
+            print(f"HTTP connection error: {e}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": "All RapidAPI keys exhausted due to HTTP connection errors."}
+            continue
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {e}. Raw response: {data.decode('utf-8')}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": "All RapidAPI keys exhausted due to invalid JSON responses."}
+            continue
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": f"All RapidAPI keys exhausted due to unexpected errors: {str(e)}"}
+            continue
+    else:
+        return {"error": "Failed to fetch Instagram post info after trying all available API keys."}
 
     data_payload = json_data.get("data", {})
     if not data_payload:
-        return None
+        return {"error": "No data payload found in API response."}
 
     is_video = data_payload.get("is_video", False)
 
-    caption_text = safe_get(data_payload, "caption.text") 
+    caption_text = safe_get(data_payload, "caption.text")
     likes_count = safe_get(data_payload, "metrics.like_count")
     comments_count = safe_get(data_payload, "metrics.comment_count")
     shares_count = safe_get(data_payload, "metrics.share_count", "N/A")
