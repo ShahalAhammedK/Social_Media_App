@@ -1,141 +1,156 @@
+# scrapers/fetch_youtube_profile_info.py
 import http.client
 import urllib.parse
 import json
 from datetime import datetime # For formatting timestamps
-from tabulate import tabulate # For pretty printing tables
 import re # Essential for extracting channel ID/handle from URLs
 
-# Note: If you encounter an error like "ModuleNotFoundError: No module named 'tabulate'",
-# you need to install the tabulate library. Open your terminal or command prompt and run:
-# pip install tabulate
+# Assuming utils.py is in the same directory or accessible via package import
+from .utils import safe_get, format_timestamp
+from .api_key_manager import rapidapi_key_manager # Import the key manager
 
-# --- Configuration ---
-# YouTube API for Channel Details (using the specified host)
-RAPIDAPI_KEY_YOUTUBE_CHANNEL = "06e813f846mshd0abac9d8ccb0e0p17d5e9jsn610b6a71b016" # Your RapidAPI key
+# --- Configuration (Host specific to this YouTube Channel API) ---
 RAPIDAPI_HOST_YOUTUBE_CHANNEL = "youtube-shorts-sounds-songs-api.p.rapidapi.com"
 
-headers_youtube_channel = {
-    'x-rapidapi-key': RAPIDAPI_KEY_YOUTUBE_CHANNEL,
-    'x-rapidapi-host': RAPIDAPI_HOST_YOUTUBE_CHANNEL
-}
-
-def safe_get(data, path, default="N/A"):
+def extract_youtube_identifier(identifier):
     """
-    Safely retrieves a nested value from a dictionary using a dot-separated path.
-    Returns default if any key in the path is not found or if an intermediate value
-    is not a dictionary.
+    Extracts the channel handle (e.g., @handle) or channel ID (e.g., UC...) from a full URL.
+    If already a handle or ID, returns as is.
     """
-    keys = path.split(".")
-    value = data
-    for key in keys:
-        if isinstance(value, dict):
-            value = value.get(key, {})
+    if identifier.startswith("http"):
+        # This regex tries to capture either @handle, /channel/UCid, or /c/legacyname
+        match = re.search(r'youtube\.com/(?:@|channel/|c/)?([a-zA-Z0-9@_.\-]+)', identifier)
+        if match:
+            extracted = match.group(1)
+            # If it looks like a channel ID (starts with UC) or already has '@', return as is
+            if extracted.startswith("UC") or extracted.startswith("@"):
+                return extracted
+            # Otherwise, assume it's a handle that might be missing the '@'
+            return "@" + extracted
         else:
-            return default # Path segment not a dict, cannot go further
-    return value if value else default # Return actual value or default if empty/None
-
-def format_timestamp(ts, include_time=False):
-    """
-    Formats a Unix timestamp (or date string if already formatted) into a readable datetime string.
-    Handles 'N/A' or invalid timestamps gracefully.
-    If include_time is True, returns date and time.
-    """
-    if ts == "N/A" or not ts:
-        return "N/A"
-    try:
-        # This API's timestamps might be in various formats, or not needed for channel details
-        # Keeping for consistency with other utils, but it might not be directly applicable
-        # to channel published dates/times from this specific API.
-        if isinstance(ts, int) or (isinstance(ts, str) and ts.isdigit()):
-            ts_int = int(ts)
-            dt_object = datetime.utcfromtimestamp(ts_int)
-        else:
-            dt_object = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-            
-        if include_time:
-            return dt_object.strftime('%Y-%m-%d %H:%M:%S UTC')
-        else:
-            return dt_object.strftime('%Y-%m-%d')
-    except (ValueError, TypeError, Exception):
-        return "Invalid timestamp"
+            return None # Could not extract a valid identifier from the URL
+    return identifier # If not a URL, assume it's already an identifier
 
 def fetch_youtube_profile_info(channel_identifier):
     """
-    Fetches detailed information for a YouTube channel using its handle (e.g., "@TeamFalconsGG") or URL.
-    Returns a dictionary of extracted details.
+    Fetches detailed information for a YouTube channel using its handle (e.g., "@TeamFalconsGG") or URL,
+    implementing API key rotation for resilience against rate limits or invalid keys.
+    Returns a dictionary of extracted details or an error dictionary if fetching fails.
     """
-    conn = http.client.HTTPSConnection(RAPIDAPI_HOST_YOUTUBE_CHANNEL)
+    conn = None # Initialize conn to None to ensure it's defined for the finally block
     
-    # Determine if the identifier is a URL or a handle
-    # If it's a URL, extract the channel handle/ID
-    handle_for_api = channel_identifier
-    if channel_identifier.startswith("http"):
-        # Regex to extract handle (starts with @) or channel ID (UC...) from various YouTube URL formats
-        # Matches @handle, /channel/UCid, or /c/legacyname
-        match_handle = re.search(r'(?:youtube\.com\/(?:@|channel\/|c\/))([a-zA-Z0-9_-]+)', channel_identifier)
-        if match_handle:
-            handle_for_api = match_handle.group(1)
-            # Prepend '@' if it looks like a handle but doesn't have it (e.g., extracted "marquesbrownlee")
-            if not handle_for_api.startswith('@') and not handle_for_api.startswith('UC'):
-                 handle_for_api = '@' + handle_for_api
-        else:
-            print(f"Error: Could not extract channel handle/ID from URL: {channel_identifier}. Skipping.")
-            return None
+    handle_for_api = extract_youtube_identifier(channel_identifier)
+    if not handle_for_api:
+        print(f"Error: Could not extract valid handle or ID from: {channel_identifier}")
+        return {"error": f"Could not extract valid handle or ID from URL: {channel_identifier}"}
 
-    try:
-        # Properly encode the channel handle for the GET request URL
-        encoded_handle = urllib.parse.quote(handle_for_api, safe='')
+    # Properly encode the channel handle/ID for the GET request URL
+    encoded_handle = urllib.parse.quote(handle_for_api, safe='')
+    endpoint = f"/channel/handle/{encoded_handle}"
 
-        # Request channel details using the GET endpoint structure
-        # The API supports fetching by handle or channel ID directly in the path
-        endpoint = f"/channel/handle/{encoded_handle}"
-        conn.request("GET", endpoint, headers=headers_youtube_channel)
+    # --- API Request with Key Rotation Loop ---
+    # This loop attempts to fetch data, rotating API keys if a failure occurs due to
+    # rate limits, invalid keys, or other transient errors.
+    for _ in range(rapidapi_key_manager.max_key_rotations):
+        try:
+            # Get headers with the current active API key and the specific host for YouTube Channel API
+            current_headers = rapidapi_key_manager.get_headers(RAPIDAPI_HOST_YOUTUBE_CHANNEL)
+            
+            # Establish an HTTPS connection to the RapidAPI host
+            conn = http.client.HTTPSConnection(RAPIDAPI_HOST_YOUTUBE_CHANNEL)
+            # Send the GET request
+            conn.request("GET", endpoint, headers=current_headers)
+            # Get the response
+            res = conn.getresponse()
+            data = res.read() # Read the response body
 
-        # Get response
-        res = conn.getresponse()
-        data = res.read()
+            # Decode the raw API response from bytes to a UTF-8 string
+            raw_response_str = data.decode("utf-8")
+            response_json = json.loads(raw_response_str)
 
-        # Decode the raw API response and parse the JSON
-        raw_response_str = data.decode("utf-8")
-        response_json = json.loads(raw_response_str)
+            # Check HTTP status codes and API-specific error messages for key rotation triggers
+            error_message_from_api = safe_get(response_json, 'message', safe_get(response_json, 'error', ''))
+            
+            # 429 status code indicates Too Many Requests (Rate Limit)
+            if res.status == 429:
+                print(f"Rate limit hit with current key (index: {rapidapi_key_manager.current_key_index}) for YouTube Channel API. Rotating key...")
+                # Attempt to rotate to the next key. If no more keys, return error.
+                if not rapidapi_key_manager.rotate_key():
+                    return {"error": "All RapidAPI keys exhausted or invalid for YouTube Channel rate limit."}
+                continue # Retry the request with the new key in the next iteration
 
-        # Check if the JSON response contains expected data (e.g., 'id' or 'name')
-        if safe_get(response_json, 'id') or safe_get(response_json, 'name'):
-            channel_handle_val = safe_get(response_json, 'handle', handle_for_api) # Use original or extracted if not in response
-            channel_name = safe_get(response_json, 'name')
-            subscribers = safe_get(response_json, 'subscribers')
-            total_videos = safe_get(response_json, 'videoCount')
-            total_views = safe_get(response_json, 'viewCount')
+            # Check for messages indicating invalid key or subscription issues, or 401/403 status
+            elif ("not subscribed" in str(error_message_from_api).lower() or 
+                  "invalid api key" in str(error_message_from_api).lower() or 
+                  res.status in [401, 403]):
+                print(f"Current key (index: {rapidapi_key_manager.current_key_index}) invalid or subscription issue for YouTube Channel API. Rotating key...")
+                # Attempt to rotate to the next key. If no more keys, return error.
+                if not rapidapi_key_manager.rotate_key():
+                    return {"error": "All RapidAPI keys exhausted or invalid for YouTube Channel subscription/authentication."}
+                continue # Retry the request with the new key
 
-            # Construct YouTube channel URL from the handle
-            channel_url = f"https://www.youtube.com/{channel_handle_val}" if channel_handle_val != "N/A" else "N/A"
+            # If it's not a 200 OK and not a key/rate limit issue, it's a general API error
+            elif res.status != 200:
+                print(f"YouTube Channel API Error {res.status}: {error_message_from_api}. Not a rate limit, returning error.")
+                return {"error": f"YouTube Channel API Error {res.status}: {error_message_from_api}"}
+            
+            # Check if the JSON response contains expected valid data (e.g., 'id' or 'name')
+            if not (safe_get(response_json, 'id') or safe_get(response_json, 'name')):
+                final_api_error_message = error_message_from_api if error_message_from_api else 'No valid data or specific error message from API.'
+                print(f"API returned no valid data for {channel_identifier}. Full response: {raw_response_str}")
+                return {"error": f"YouTube Channel API returned no valid data for {channel_identifier}: {final_api_error_message}"}
 
-            return {
-                "Channel Handle": channel_handle_val,
-                "Channel Name": channel_name,
-                "Subscribers": str(subscribers),
-                "Total Videos": str(total_videos),
-                "Total Channel Views": str(total_views),
-                "Channel URL": channel_url
-            }
-        else:
-            # If expected keys are not found, assume it's an error response
-            print(f"API returned no valid data for {channel_identifier}. Full response: {raw_response_str}")
-            return None
+            break # Exit loop if the request was successful and data is valid
 
-    except json.JSONDecodeError:
-        print(f"Error for {channel_identifier}: Could not decode JSON response. The API response might not be valid JSON.")
-        return None
-    except Exception as e:
-        print(f"An unexpected error occurred for {channel_identifier}: {e}")
-        return None
-    finally:
-        # Ensure the connection is closed
-        conn.close()
+        except http.client.HTTPException as e:
+            # Catch HTTP connection errors (e.g., host unreachable)
+            print(f"HTTP connection error for {channel_identifier}: {e}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": "All RapidAPI keys exhausted due to HTTP connection errors for YouTube Channel."}
+            continue # Retry with next key
+        except json.JSONDecodeError:
+            # Catch errors if the response is not valid JSON
+            print(f"Error for {channel_identifier}: Could not decode JSON response from YouTube Channel API. Raw response: {raw_response_str}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": "All RapidAPI keys exhausted due to invalid JSON responses from YouTube Channel API."}
+            continue # Retry with next key
+        except Exception as e:
+            # Catch any other unexpected errors
+            print(f"An unexpected error occurred for {channel_identifier} with YouTube Channel API: {e}. Retrying with next key...")
+            if not rapidapi_key_manager.rotate_key():
+                return {"error": f"All RapidAPI keys exhausted due to unexpected errors with YouTube Channel API: {str(e)}"}
+            continue # Retry with next key
+        finally:
+            # Ensure the HTTP connection is closed whether the request succeeded or failed
+            if conn:
+                conn.close()
+    else: # This 'else' block executes if the loop completes without a 'break' statement,
+        # meaning all available API keys were tried and failed to get a successful response.
+        return {"error": "Failed to fetch YouTube channel info after trying all available API keys."}
 
-# --- Example Usage ---
+    # --- Data Extraction (executed only if API call was successful and loop broke) ---
+    # Extract specific channel details from the parsed JSON response
+    channel_handle_val = safe_get(response_json, 'handle', handle_for_api) # Use original or extracted if not in response
+    channel_name = safe_get(response_json, 'name')
+    subscribers = safe_get(response_json, 'subscribers')
+    total_videos = safe_get(response_json, 'videoCount')
+    total_views = safe_get(response_json, 'viewCount')
+
+    # Construct YouTube channel URL from the handle
+    channel_url = f"https://www.youtube.com/{channel_handle_val}" if channel_handle_val != "N/A" else "N/A"
+
+    return {
+        "Channel Handle": channel_handle_val,
+        "Channel Name": channel_name,
+        "Subscribers": str(subscribers),
+        "Total Videos": str(total_videos),
+        "Total Channel Views": str(total_views),
+        "Channel URL": channel_url
+    }
+
+# --- Example Usage (only runs when this file is executed directly) ---
 if __name__ == "__main__":
-    # Define multiple YouTube channel handles or URLs in a list
+    # Define multiple YouTube channel handles or URLs in a list for testing
     youtube_channels_to_process = [
         "@TeamFalconsGG",
         "https://www.youtube.com/@marquesbrownlee", # URL with @handle
@@ -162,19 +177,28 @@ if __name__ == "__main__":
     for identifier in youtube_channels_to_process:
         print(f"\nProcessing Channel: {identifier}")
         profile_details = fetch_youtube_profile_info(identifier)
-        if profile_details:
+        if profile_details and not profile_details.get("error"): # Check for successful fetch and no error
             # Convert the dictionary output to a list based on output_headers order
             row_data_list = [profile_details.get(header, 'N/A') for header in output_headers]
             collected_profile_rows_for_output.append(row_data_list)
             print("Successfully extracted basic profile details.")
         else:
-            print(f"Failed to retrieve profile details for {identifier}.")
+            # Print the error message if the fetch failed
+            error_msg = profile_details.get("error", "Unknown error") if profile_details else "No details retrieved."
+            print(f"Failed to retrieve profile details for {identifier}. Error: {error_msg}")
         print("-" * 40)
 
     # Print the collected data as a formatted table
     if collected_profile_rows_for_output:
         print("\n--- YouTube Channel Basic Information Table ---")
-        print(tabulate(collected_profile_rows_for_output, headers=output_headers, tablefmt="fancy_grid"))
+        try:
+            from tabulate import tabulate # Import tabulate here if not already at top for main guard
+            print(tabulate(collected_profile_rows_for_output, headers=output_headers, tablefmt="fancy_grid"))
+        except ImportError:
+            print("Please install 'tabulate' library (pip install tabulate) to view formatted table.")
+            # Fallback to simple print if tabulate is not available
+            for row in collected_profile_rows_for_output:
+                print(row)
         print("---------------------------------------------")
     else:
         print("\nNo basic profile details collected for the specified YouTube channels.")
