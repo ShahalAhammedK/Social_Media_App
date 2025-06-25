@@ -80,13 +80,21 @@ def fetch_instagram_post_info(post_identifier):
     if not data_payload:
         return {"error": "No data payload found in API response."}
 
-    is_video = data_payload.get("is_video", False) # This indicates if the media is a video, not necessarily a 'reel' URL type.
+    is_video = data_payload.get("is_video", False)
 
     caption_text = safe_get(data_payload, "caption.text")
     likes_count = safe_get(data_payload, "metrics.like_count")
     comments_count = safe_get(data_payload, "metrics.comment_count")
     shares_count = safe_get(data_payload, "metrics.share_count", "N/A")
     video_views_count = safe_get(data_payload, "metrics.play_count") if is_video else "N/A"
+    
+    # Extract duration in milliseconds and convert to seconds
+    video_duration_seconds = "N/A"
+    if is_video:
+        duration_ms = safe_get(data_payload, "clips_metadata.original_sound_info.duration_in_ms")
+        if duration_ms and isinstance(duration_ms, (int, float)):
+            video_duration_seconds = duration_ms / 1000
+
     raw_taken_at = safe_get(data_payload, "caption.created_at")
     taken_at_formatted = format_timestamp(raw_taken_at, include_time=True)
     username_val = safe_get(data_payload, "user.username")
@@ -111,6 +119,7 @@ def fetch_instagram_post_info(post_identifier):
         "Comments": str(comments_count),
         "Shares": str(shares_count),
         "Video Views": str(video_views_count),
+        "Video Duration (seconds)": str(video_duration_seconds),
         "Created At": taken_at_formatted,
         "Username": username_val,
         "Full Name": full_name_val,
