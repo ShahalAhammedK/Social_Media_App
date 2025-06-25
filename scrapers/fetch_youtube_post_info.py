@@ -10,7 +10,7 @@ from langdetect import detect, DetectorFactory # Import language detection libra
 DetectorFactory.seed = 0
 
 # Assuming utils.py is in the same directory or accessible via package import
-from .utils import safe_get, format_timestamp
+from .utils import safe_get, format_timestamp # Keep format_timestamp if it's used elsewhere for different types
 from .api_key_manager import rapidapi_key_manager # Import the key manager
 
 # --- Configuration (Host specific to this YouTube API) ---
@@ -137,9 +137,21 @@ def fetch_youtube_post_info(video_url): # Function name remains as provided
     # Duration is directly available in 'lengthSeconds'
     video_duration_seconds = safe_get(response_json, 'lengthSeconds')
 
-    # Published date is directly available in 'publishedDate'
-    published_date_raw = safe_get(response_json, 'publishedDate')
-    published_date_formatted = format_timestamp(published_date_raw, include_time=True) # Full timestamp
+    # --- MODIFIED: Use publishedTimestamp instead of publishedDate ---
+    published_timestamp_value = safe_get(response_json, 'publishedTimestamp')
+    published_date_formatted = "N/A" # Default value
+
+    if published_timestamp_value is not None:
+        try:
+            # Convert Unix timestamp (integer) to datetime object
+            # Ensure it's an integer before passing to fromtimestamp
+            dt_object = datetime.fromtimestamp(int(published_timestamp_value))
+            # Format the datetime object to a string "YYYY-MM-DD HH:MM:SS"
+            # This matches the 'include_time=True' behavior previously used for publishedDate
+            published_date_formatted = dt_object.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Could not convert publishedTimestamp '{published_timestamp_value}' to date: {e}")
+            # published_date_formatted remains "N/A"
 
     # Extract the video description
     video_description = safe_get(response_json, 'description')
@@ -151,7 +163,7 @@ def fetch_youtube_post_info(video_url): # Function name remains as provided
             detected_description_language = detect(video_description)
         except Exception as e:
             detected_description_language = "Undetectable"
-            print(f"    Warning: Could not detect language for video {video_id} description: {e}")
+            print(f"     Warning: Could not detect language for video {video_id} description: {e}")
 
     return {
         "Views": str(views_count),
